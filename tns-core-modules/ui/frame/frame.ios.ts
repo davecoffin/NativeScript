@@ -1,14 +1,14 @@
 ﻿// Definitions.
-import { iOSFrame as iOSFrameDefinition, BackstackEntry, NavigationTransition } from ".";
+import { iOSFrame as iOSFrameDefinition, BackstackEntry, NavigationTransition, NavigationEntry } from ".";
 import { Page } from "../page";
 import { profile } from "../../profiling";
 
 //Types.
-import { FrameBase, View, application, layout, traceEnabled, traceWrite, traceCategories, isCategorySet } from "./frame-common";
+import { FrameBase, View, topmost, layout, traceEnabled, traceWrite, traceCategories, isCategorySet } from "./frame-common";
 import { _createIOSAnimatedTransitioning } from "./fragment.transitions";
 // HACK: Webpack. Use a fully-qualified import to allow resolve.extensions(.ios.js) to
 // kick in. `../utils` doesn't seem to trigger the webpack extensions mechanism.
-import * as uiUtils from "tns-core-modules/ui/utils";
+import * as uiUtils from "../../ui/utils";
 import * as utils from "../../utils/utils";
 
 export * from "./frame-common";
@@ -21,54 +21,20 @@ const DELEGATE = "_delegate";
 let navDepth = -1;
 
 export class Frame extends FrameBase {
-    private _ios: iOSFrame;
-    private _paramToNavigate: any;
+    public viewController: UINavigationControllerImpl;
     public _animatedDelegate = <UINavigationControllerDelegate>UINavigationControllerAnimatedDelegate.new();
 
-    public _shouldSkipNativePop: boolean = false;
-    public _navigateToEntry: BackstackEntry;
-    public _widthMeasureSpec: number;
-    public _heightMeasureSpec: number;
-    public _right: number;
-    public _bottom: number;
-    public _isInitialNavigation: boolean = true;
+    private _ios: iOSFrame;
 
     constructor() {
         super();
         this._ios = new iOSFrame(this);
+        this.viewController = this._ios.controller;
         this.nativeViewProtected = this._ios.controller.view;
-
-        // When there is a 40px high "in-call" status bar, nobody moves the navigationBar top from 20 to 40 and it remains underneath the status bar.
-        let frameRef = new WeakRef(this);
-        application.ios.addNotificationObserver(UIApplicationDidChangeStatusBarFrameNotification, (notification: NSNotification) => {
-            let frame = frameRef.get();
-            if (frame) {
-                frame._handleHigherInCallStatusBarIfNeeded();
-                if (frame.currentPage) {
-                    frame.currentPage.requestLayout();
-                }
-            }
-        });
     }
 
-    @profile
-    public onLoaded() {
-        super.onLoaded();
-
-        if (this._paramToNavigate) {
-            this.navigate(this._paramToNavigate);
-            this._paramToNavigate = undefined;
-        }
-    }
-
-    public navigate(param: any) {
-        if (this.isLoaded) {
-            super.navigate(param);
-            this._isInitialNavigation = false;
-        }
-        else {
-            this._paramToNavigate = param;
-        }
+    public get ios(): iOSFrame {
+        return this._ios;
     }
 
     @profile
@@ -126,7 +92,7 @@ export class Frame extends FrameBase {
         // We should clear the entire history.
         if (clearHistory) {
             viewController.navigationItem.hidesBackButton = true;
-            let newControllers = NSMutableArray.alloc().initWithCapacity(1);
+            const newControllers = NSMutableArray.alloc().initWithCapacity(1);
             newControllers.addObject(viewController);
 
             // Mark all previous ViewControllers as cleared
@@ -177,23 +143,20 @@ export class Frame extends FrameBase {
 
     public _goBackCore(backstackEntry: BackstackEntry) {
         super._goBackCore(backstackEntry);
-
         navDepth = backstackEntry[NAV_DEPTH];
 
-        if (!this._shouldSkipNativePop) {
-            let controller = backstackEntry.resolvedPage.ios;
-            let animated = this._currentEntry ? this._getIsAnimatedNavigation(this._currentEntry.entry) : false;
+        let controller = backstackEntry.resolvedPage.ios;
+        let animated = this._currentEntry ? this._getIsAnimatedNavigation(this._currentEntry.entry) : false;
 
-            this._updateActionBar(backstackEntry.resolvedPage);
-            if (traceEnabled()) {
-                traceWrite(`${this}.popToViewControllerAnimated(${controller}, ${animated}); depth = ${navDepth}`, traceCategories.Navigation);
-            }
-            this._ios.controller.popToViewControllerAnimated(controller, animated);
+        this._updateActionBar(backstackEntry.resolvedPage);
+        if (traceEnabled()) {
+            traceWrite(`${this}.popToViewControllerAnimated(${controller}, ${animated}); depth = ${navDepth}`, traceCategories.Navigation);
         }
+
+        this._ios.controller.popToViewControllerAnimated(controller, animated);
     }
 
     public _updateActionBar(page?: Page, disableNavBarAnimation: boolean = false): void {
-
         super._updateActionBar(page);
 
         if (page && this.currentPage && this.currentPage.modal === page) {
@@ -242,10 +205,6 @@ export class Frame extends FrameBase {
         }
     }
 
-    public get ios(): iOSFrame {
-        return this._ios;
-    }
-
     public static get defaultAnimatedNavigation(): boolean {
         return FrameBase.defaultAnimatedNavigation;
     }
@@ -260,128 +219,29 @@ export class Frame extends FrameBase {
         FrameBase.defaultTransition = value;
     }
 
-    public requestLayout(): void {
-        super.requestLayout();
-        // Invalidate our Window so that layout is triggered again.
-        let window = this.nativeViewProtected.window;
-        if (window) {
-            window.setNeedsLayout();
-        }
-    }
-
     public onMeasure(widthMeasureSpec: number, heightMeasureSpec: number): void {
-        let width = layout.getMeasureSpecSize(widthMeasureSpec);
-        let widthMode = layout.getMeasureSpecMode(widthMeasureSpec);
+        const width = layout.getMeasureSpecSize(widthMeasureSpec);
+        const widthMode = layout.getMeasureSpecMode(widthMeasureSpec);
 
-        let height = layout.getMeasureSpecSize(heightMeasureSpec);
-        let heightMode = layout.getMeasureSpecMode(heightMeasureSpec);
+        const height = layout.getMeasureSpecSize(heightMeasureSpec);
+        const heightMode = layout.getMeasureSpecMode(heightMeasureSpec);
 
-        this._widthMeasureSpec = widthMeasureSpec;
-        this._heightMeasureSpec = heightMeasureSpec;
-
-        let result = this.measurePage(this.currentPage);
-        if (this._navigateToEntry && this.currentPage) {
-            let newPageSize = this.measurePage(this._navigateToEntry.resolvedPage);
-            result.measuredWidth = Math.max(result.measuredWidth, newPageSize.measuredWidth);
-            result.measuredHeight = Math.max(result.measuredHeight, newPageSize.measuredHeight);
-        }
-
-        let widthAndState = View.resolveSizeAndState(result.measuredWidth, width, widthMode, 0);
-        let heightAndState = View.resolveSizeAndState(result.measuredHeight, height, heightMode, 0);
+        const widthAndState = View.resolveSizeAndState(width, width, widthMode, 0);
+        const heightAndState = View.resolveSizeAndState(height, height, heightMode, 0);
 
         this.setMeasuredDimension(widthAndState, heightAndState);
     }
 
-    public measurePage(page: Page): { measuredWidth: number; measuredHeight: number } {
-        // If background does not span under statusbar - reduce available height.
-        let heightSpec: number = this._heightMeasureSpec;
-        if (page && !page.backgroundSpanUnderStatusBar && !this.parent) {
-            let height = layout.getMeasureSpecSize(this._heightMeasureSpec);
-            let heightMode = layout.getMeasureSpecMode(this._heightMeasureSpec);
-            let statusBarHeight = uiUtils.ios.getStatusBarHeight();
-            heightSpec = layout.makeMeasureSpec(height - statusBarHeight, heightMode);
-        }
-
-        return View.measureChild(this, page, this._widthMeasureSpec, heightSpec);
+    public layoutNativeView(left: number, top: number, right: number, bottom: number): void {
+        //
     }
 
-    public onLayout(left: number, top: number, right: number, bottom: number): void {
-        this._right = right;
-        this._bottom = bottom;
-        this._handleHigherInCallStatusBarIfNeeded();
-        this.layoutPage(this.currentPage);
-        if (this._navigateToEntry && this.currentPage) {
-            this.layoutPage(this._navigateToEntry.resolvedPage);
-        }
-    }
-
-    public layoutPage(page: Page): void {
-        if (page && (<any>page)._viewWillDisappear) {
-            //https://github.com/NativeScript/NativeScript/issues/1201
-            return;
-        }
-
-        // If background does not span under statusbar - reduce available height and adjust top offset.
-        let statusBarHeight = (page && !page.backgroundSpanUnderStatusBar && !this.parent) ? uiUtils.ios.getStatusBarHeight() : 0;
-
-        // Status bar height should be ignored when UINavigationBar is visible and not translucent
-        if (this._ios.showNavigationBar &&
-            !this._ios.controller.navigationBar.translucent &&
-            page && (<any>page)._ios && !(<any>page)._ios.shown) {
-            statusBarHeight = 0;
-        }
-        View.layoutChild(this, page, 0, statusBarHeight, this._right, this._bottom);
-    }
-
-    public get navigationBarHeight(): number {
-        let navigationBar = this._ios.controller.navigationBar;
-        return (navigationBar && !this._ios.controller.navigationBarHidden) ? navigationBar.frame.size.height : 0;
-    }
-
-    public _setNativeViewFrame(nativeView: any, frame: any) {
-        // HACK: The plugin https://github.com/hackiftekhar/IQKeyboardManager offsets our Frame's 'nativeView.frame.origin.y'
-        // to a negative value so the currently focused TextField/TextView is always on the screen while the soft keyboard is showing.
-        // Our Frame always wants to have an origin of {0, 0}, so if someone else has been playing with origin.x or origin.y do not bring it back to {0, 0}.
-        if (nativeView.frame.size.width === frame.size.width && nativeView.frame.size.height === frame.size.height) {
-            return;
-        }
-
-        super._setNativeViewFrame(nativeView, frame);
-    }
-
-    public remeasureFrame(): void {
-        this.requestLayout();
-        let window: UIWindow = this.nativeViewProtected.window;
-        if (window) {
-            window.layoutIfNeeded();
-        }
+    public _setNativeViewFrame(nativeView: UIView, frame: CGRect) {
+        //
     }
 
     public _onNavigatingTo(backstackEntry: BackstackEntry, isBack: boolean) {
         //
-    }
-
-    _handleHigherInCallStatusBarIfNeeded() {
-        let statusBarHeight = uiUtils.ios.getStatusBarHeight();
-        if (!this._ios ||
-            !this._ios.controller ||
-            !this._ios.controller.navigationBar ||
-            this._ios.controller.navigationBar.hidden ||
-            utils.layout.toDevicePixels(this._ios.controller.navigationBar.frame.origin.y) === statusBarHeight) {
-            return;
-        }
-
-        if (traceEnabled()) {
-            traceWrite(`Forcing navigationBar.frame.origin.y to ${statusBarHeight} due to a higher in-call status-bar`, traceCategories.Layout);
-        }
-
-        this._ios.controller.navigationBar.autoresizingMask = UIViewAutoresizing.None;
-        this._ios.controller.navigationBar.removeConstraints((<any>this)._ios.controller.navigationBar.constraints);
-        this._ios.controller.navigationBar.frame = CGRectMake(
-            this._ios.controller.navigationBar.frame.origin.x,
-            utils.layout.toDeviceIndependentPixels(statusBarHeight),
-            this._ios.controller.navigationBar.frame.size.width,
-            this._ios.controller.navigationBar.frame.size.height);
     }
 }
 
@@ -484,20 +344,18 @@ class UINavigationControllerImpl extends UINavigationController {
     @profile
     public viewWillAppear(animated: boolean): void {
         super.viewWillAppear(animated);
-        let owner = this._owner.get();
-        if (owner && (!owner.isLoaded && !owner.parent)) {
-            owner.onLoaded();
+        const owner = this._owner.get();
+        if (owner && !owner.isLoaded && !owner.parent) {
+            owner.callLoaded();
         }
     }
 
-    public viewDidLayoutSubviews(): void {
-        let owner = this._owner.get();
-        if (owner) {
-            if (traceEnabled()) {
-                traceWrite(this._owner + " viewDidLayoutSubviews, isLoaded = " + owner.isLoaded, traceCategories.ViewHierarchy);
-            }
-
-            owner._updateLayout();
+    @profile
+    public viewDidDisappear(animated: boolean): void {
+        super.viewDidDisappear(animated);    
+        const owner = this._owner.get();
+        if (owner && owner.isLoaded && !owner.parent && !this.presentedViewController) {
+            owner.callUnloaded();
         }
     }
 
@@ -529,6 +387,7 @@ class UINavigationControllerImpl extends UINavigationController {
         });
     }
 
+    @profile
     public pushViewControllerAnimated(viewController: UIViewController, animated: boolean): void {
         let navigationTransition = <NavigationTransition>viewController[TRANSITION];
         if (traceEnabled()) {
@@ -546,6 +405,7 @@ class UINavigationControllerImpl extends UINavigationController {
         });
     }
 
+    @profile
     public setViewControllersAnimated(viewControllers: NSArray<any>, animated: boolean): void {
         let viewController = viewControllers.lastObject;
         let navigationTransition = <NavigationTransition>viewController[TRANSITION];
@@ -699,7 +559,6 @@ class iOSFrame implements iOSFrameDefinition {
     constructor(frame: Frame) {
         this._frame = frame;
         this._controller = UINavigationControllerImpl.initWithOwner(new WeakRef(frame));
-        this._controller.automaticallyAdjustsScrollViewInsets = false;
     }
 
     public get controller() {
@@ -710,17 +569,15 @@ class iOSFrame implements iOSFrameDefinition {
         return this._showNavigationBar;
     }
     public set showNavigationBar(value: boolean) {
-        let change = this._showNavigationBar !== value;
         this._showNavigationBar = value;
 
-        let animated = !this._frame._isInitialNavigation && !this._disableNavBarAnimation;
+        const viewController = this._controller.viewControllers;
+        const length = viewController ? viewController.count : 0;
+        const animated = length > 0 && !this._disableNavBarAnimation;
 
-        this._controller.setNavigationBarHiddenAnimated(!value, animated);
-
-        let currentPage = this._controller.owner.currentPage;
-        if (currentPage && change) {
-            currentPage.requestLayout();
-        }
+        this._controller.setNavigationBarHiddenAnimated(!value, true);
+        // this._controller.view.setNeedsLayout();
+        // this._controller.view.layoutIfNeeded();
     }
 
     public get navBarVisibility(): "auto" | "never" | "always" {

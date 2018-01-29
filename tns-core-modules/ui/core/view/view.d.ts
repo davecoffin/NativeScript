@@ -64,10 +64,27 @@ export interface Size {
 }
 
 /**
+ * Defines the data for the shownModally event.
+ */
+export interface ShownModallyData extends EventData {
+    /**
+     * The context (optional, may be undefined) passed to the view when shown modally.
+     */
+    context?: any;
+
+    /**
+     * A callback to call when you want to close the modally shown view.
+     * Pass in any kind of arguments and you will receive when the callback parameter
+     * of View.showModal is executed.
+     */
+    closeCallback?: Function;
+}
+
+/**
  * This class is the base class for all UI components. 
  * A View occupies a rectangular area on the screen and is responsible for drawing and layouting of all UI components within. 
  */
-export abstract class View extends ViewBase implements ApplyXmlAttributes {
+export abstract class View extends ViewBase {
     /**
      * Gets the android-specific native instance that lies behind this proxy. Will be available if running on an Android platform.
      */
@@ -82,8 +99,6 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * Gets or sets the binding context of this instance. This object is used as a source for each Binding that does not have a source object specified.
      */
     bindingContext: any;
-
-    //----------Style property shortcuts----------
 
     /**
      * Gets or sets the border color of the view.
@@ -164,6 +179,11 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * Gets or sets the color of the view.
      */
     color: Color;
+
+    /**
+     * Gets or sets the background style property.
+     */
+    background: string;
 
     /**
      * Gets or sets the background color of the view.
@@ -323,7 +343,7 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * @param r Right position, relative to parent
      * @param b Bottom position, relative to parent
      */
-    public layout(left: number, top: number, right: number, bottom: number): void;
+    public layout(left: number, top: number, right: number, bottom: number, setFrame?: boolean): void;
 
     /**
      * Returns the raw width component.
@@ -336,11 +356,6 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
     public getMeasuredHeight(): number;
 
     public getMeasuredState(): number;
-
-    /**
-     * Call this when something has changed which has invalidated the layout of this view. This will schedule a layout pass of the view tree.
-     */
-    public requestLayout(): void;
 
     /**
      * Measure the view and its content to determine the measured width and the measured height. This method is invoked by measure(int, int) and should be overriden by subclasses to provide accurate and efficient measurement of their contents.
@@ -413,12 +428,6 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      */
     public focus(): boolean;
 
-    /**
-     * Sets in-line CSS string as style.
-     * @param style - In-line CSS string. 
-     */
-    public setInlineStyle(style: string): void;
-
     public getGestureObservers(type: GestureTypes): Array<GesturesObserver>;
 
     /**
@@ -435,7 +444,7 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * @param callback - Callback function which will be executed when event is raised.
      * @param thisArg - An optional parameter which will be used as `this` context for callback execution.
      */
-    on(eventNames: string | GestureTypes, callback: (data: EventData) => void, thisArg?: any);
+    on(eventNames: string | GestureTypes, callback: (args: EventData) => void, thisArg?: any);
 
     /**
      * Removes listener(s) for the specified event name.
@@ -443,7 +452,7 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * @param callback An optional parameter pointing to a specific listener. If not defined, all listeners for the event names will be removed.
      * @param thisArg An optional parameter which when set will be used to refine search of the correct callback which will be removed as event listener.
      */
-    off(eventNames: string | GestureTypes, callback?: (data: EventData) => void, thisArg?: any);
+    off(eventNames: string | GestureTypes, callback?: (args: EventData) => void, thisArg?: any);
 
     /**
      * Raised when a loaded event occurs.
@@ -454,6 +463,58 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * Raised when an unloaded event occurs.
      */
     on(event: "unloaded", callback: (args: EventData) => void, thisArg?: any);
+
+    /**
+     * Raised when a back button is pressed.
+     * This event is raised only for android.
+     */
+    on(event: "androidBackPressed", callback: (args: EventData) => void, thisArg?: any);
+
+    /**
+     * Raised before the view is shown as a modal dialog.
+     */
+    on(event: "showingModally", callback: (args: ShownModallyData) => void, thisArg?: any): void;
+
+    /**
+     * Raised after the view is shown as a modal dialog.
+     */
+    on(event: "shownModally", callback: (args: ShownModallyData) => void, thisArg?: any);
+
+    /**
+    * Shows the View contained in moduleName as a modal view.
+    * @param moduleName - The name of the module to load starting from the application root.
+    * @param context - Any context you want to pass to the modally shown view.
+    * This same context will be available in the arguments of the shownModally event handler.
+    * @param closeCallback - A function that will be called when the view is closed.
+    * Any arguments provided when calling ShownModallyData.closeCallback will be available here.
+    * @param fullscreen - An optional parameter specifying whether to show the modal page in full-screen mode.
+    */
+    showModal(moduleName: string, context: any, closeCallback: Function, fullscreen?: boolean, animated?: boolean): View;
+
+    /**
+     * Shows the view passed as parameter as a modal view.
+     * @param view - View instance to be shown modally.
+     * @param context - Any context you want to pass to the modally shown view. This same context will be available in the arguments of the shownModally event handler.
+     * @param closeCallback - A function that will be called when the view is closed. Any arguments provided when calling ShownModallyData.closeCallback will be available here.
+     * @param fullscreen - An optional parameter specifying whether to show the modal view in full-screen mode.
+     */
+    showModal(view: View, context: any, closeCallback: Function, fullscreen?: boolean, animated?: boolean): View;
+
+    /**
+     * Deprecated. Showing view as modal is deprecated.
+     * Use showModal method with arguments.
+     */
+    showModal(): View;
+
+    /**
+     * Closes the current modal view that this page is showing.
+     */
+    closeModal(): void;
+
+    /**
+     * Returns the current modal view that this page is showing (is parent of), if any.
+     */
+    modal: View;
 
     /**
      * Animates one or more properties of the view based on the supplied options. 
@@ -485,15 +546,38 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      */
     public getActualSize(): Size;
 
+    /**
+     * @private
+     * A valid css string which will be applied for all nested UI components (based on css rules).
+     */
+    css: string;
+
+    /**
+     * @private
+     * Adds a new values to current css.
+     * @param cssString - A valid css which will be added to current css. 
+     */
+    addCss(cssString: string): void;
+
+    /**
+     * @private
+     * Adds the content of the file to the current css.
+     * @param cssFileName - A valid file name (from the application root) which contains a valid css.
+     */
+    addCssFile(cssFileName: string): void;
+
     // Lifecycle events
     _getNativeViewsCount(): number;
 
     _eachLayoutView(callback: (View) => void): void;
 
-    public _applyXmlAttribute(attribute: string, value: any): boolean;
     public eachChildView(callback: (view: View) => boolean): void;
 
     //@private
+    /**
+     * @private
+     */
+    _modalParent?: View;
     /**
      * @private
      */
@@ -506,10 +590,6 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
      * @private
      */
     _setNativeClipToBounds(): void;
-    /**
-     * @private
-     */
-    _updateLayout(): void;
     /**
      * Called by measure method to cache measureSpecs.
      * @private
@@ -537,7 +617,11 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
     /**
      * @private
      */
-    _updateEffectiveLayoutValues(parent: View): void;
+    _updateEffectiveLayoutValues(
+        parentWidthMeasureSize: number,
+        parentWidthMeasureMode: number,
+        parentHeightMeasureSize: number,
+        parentHeightMeasureMode: number): void
     /**
      * @private
      */
@@ -561,18 +645,48 @@ export abstract class View extends ViewBase implements ApplyXmlAttributes {
     /**
      * @private
      */
-    _removeAnimation(animation: Animation): boolean
+    _removeAnimation(animation: Animation): boolean;
+    /**
+     * @private
+     */
+    _onLivesync(): boolean;
+    /**
+     * @private
+     */
+    _onBackPressed(): boolean;
+    /**
+     * @private
+     */
+    _getFragmentManager(): any; /* android.app.FragmentManager */
+
+    /**
+     * Updates styleScope or create new styleScope.
+     * @param cssFileName 
+     * @param cssString 
+     * @param css 
+     */
+    _updateStyleScope(cssFileName?: string, cssString?: string, css?: string): void;
+
+    /**
+     * Called in android when native view is attached to window.
+     */
+    _onAttachedToWindow(): void;
+
+    /**
+     * Called in android when native view is dettached from window.
+     */
+    _onDetachedFromWindow(): void;
     //@endprivate
 
     /**
      * __Obsolete:__ There is a new property system that does not rely on _getValue.
      */
-    public _getValue(property: any): never;
+    _getValue(property: any): never;
 
     /**
      * __Obsolete:__ There is a new property system that does not rely on _setValue.
      */
-    public _setValue(property: any, value: any): never;
+    _setValue(property: any, value: any): never;
 }
 
 /**
@@ -647,21 +761,18 @@ export interface AddChildFromBuilder {
     _addChildFromBuilder(name: string, value: any): void;
 }
 
-/**
- * Defines an interface used to create a member of a class from string representation (used in xml declaration).
- */
-export interface ApplyXmlAttributes {
-    /**
-     * Called for every attribute in xml declaration. <... fontWeight="bold" ../>
-     * @param attributeName - the name of the attribute (fontAttributes)
-     * @param attrValue - the value of the attribute (bold)
-     * Should return true if this attribute is handled and there is no need default handler to process it.
-     */
-    _applyXmlAttribute(attributeName: string, attrValue: any): boolean;
-}
-
 export const automationTextProperty: Property<View, string>;
 export const originXProperty: Property<View, number>;
 export const originYProperty: Property<View, number>;
 export const isEnabledProperty: Property<View, boolean>;
 export const isUserInteractionEnabledProperty: Property<View, boolean>;
+
+export namespace ios {
+    export function isContentScrollable(controller: any /* UIViewController */, owner: View): boolean 
+    export function updateAutoAdjustScrollInsets(controller: any /* UIViewController */, owner: View): void
+    export function updateConstraints(controller: any /* UIViewController */, owner: View): void;
+    export function layoutView(controller: any /* UIViewController */, owner: View): void;
+    export class UILayoutViewController {
+        public static initWithOwner(owner: WeakRef<View>): UILayoutViewController;
+    }
+}

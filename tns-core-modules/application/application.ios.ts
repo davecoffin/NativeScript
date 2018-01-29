@@ -1,41 +1,29 @@
-﻿import { iOSApplication as IOSApplicationDefinition, LaunchEventData, ApplicationEventData, OrientationChangedEventData } from ".";
+﻿import {
+    iOSApplication as IOSApplicationDefinition,
+    LaunchEventData,
+    ApplicationEventData,
+    OrientationChangedEventData,
+    LoadAppCSSEventData
+} from ".";
 
 import {
     notify, launchEvent, resumeEvent, suspendEvent, exitEvent, lowMemoryEvent,
-    orientationChangedEvent, setApplication, livesync, displayedEvent
+    orientationChangedEvent, setApplication, livesync, displayedEvent, getCssFileName
 } from "./application-common";
 
 // First reexport so that app module is initialized.
 export * from "./application-common";
 
-import { Frame, View, NavigationEntry } from "../ui/frame";
+// TODO: Remove this and get it from global to decouple builder for angular
+import { createViewFromEntry } from "../ui/builder";
+import { ios as iosView, View } from "../ui/core/view";
+import { Frame, NavigationEntry } from "../ui/frame";
 import { ios } from "../ui/utils";
 import * as utils from "../utils/utils";
+import { profile, level as profilingLevel, Level } from "../profiling";
 
 class Responder extends UIResponder {
     //
-}
-
-let displayedOnce = false;
-
-class Window extends UIWindow {
-    public content;
-
-    initWithFrame(frame: CGRect): this {
-        const window = <this>super.initWithFrame(frame);
-        if (window) {
-            window.autoresizingMask = UIViewAutoresizing.None;
-        }
-        return window;
-    }
-
-    public layoutSubviews(): void {
-        if (utils.ios.MajorVersion < 9) {
-            ios._layoutRootView(this.content, utils.ios.getter(UIScreen, UIScreen.mainScreen).bounds);
-        } else {
-            ios._layoutRootView(this.content, this.frame);
-        }
-    }
 }
 
 class NotificationObserver extends NSObject {
@@ -56,13 +44,30 @@ class NotificationObserver extends NSObject {
     };
 }
 
-class IOSApplication implements IOSApplicationDefinition {
-    public rootController: any;
+let displayedOnce = false;
+let displayedLinkTarget;
+let displayedLink;
+class CADisplayLinkTarget extends NSObject {
+    onDisplayed(link: CADisplayLink) {
+        link.invalidate();
+        const ios = utils.ios.getter(UIApplication, UIApplication.sharedApplication);
+        const object = iosApp;
+        displayedOnce = true;
+        notify(<ApplicationEventData>{ eventName: displayedEvent, object, ios });
+        displayedLinkTarget = null;
+        displayedLink = null;
+    }
+    public static ObjCExposedMethods = {
+        "onDisplayed": { returns: interop.types.void, params: [CADisplayLink] }
+    }
+}
 
+class IOSApplication implements IOSApplicationDefinition {
     private _delegate: typeof UIApplicationDelegate;
     private _currentOrientation = utils.ios.getter(UIDevice, UIDevice.currentDevice).orientation;
-    private _window: Window;
+    private _window: UIWindow;
     private _observers: Array<NotificationObserver>;
+    private _rootView: View;
 
     constructor() {
         this._observers = new Array<NotificationObserver>();
@@ -74,11 +79,15 @@ class IOSApplication implements IOSApplicationDefinition {
         this.addNotificationObserver(UIDeviceOrientationDidChangeNotification, this.orientationDidChange.bind(this));
     }
 
+    get rootController(): UIViewController {
+        return this._window.rootViewController;
+    }
+
     get nativeApp(): UIApplication {
         return utils.ios.getter(UIApplication, UIApplication.sharedApplication);
     }
 
-    get window(): Window {
+    get window(): UIWindow {
         return this._window;
     }
 
@@ -106,8 +115,17 @@ class IOSApplication implements IOSApplicationDefinition {
         }
     }
 
+    @profile
     private didFinishLaunchingWithOptions(notification: NSNotification) {
-        this._window = <Window>Window.alloc().initWithFrame(utils.ios.getter(UIScreen, UIScreen.mainScreen).bounds);
+        if (!displayedOnce && profilingLevel() >= Level.lifecycle) {
+            displayedLinkTarget = CADisplayLinkTarget.new();
+            displayedLink = CADisplayLink.displayLinkWithTargetSelector(displayedLinkTarget, "onDisplayed");
+            displayedLink.addToRunLoopForMode(NSRunLoop.mainRunLoop, NSDefaultRunLoopMode);
+            displayedLink.addToRunLoopForMode(NSRunLoop.mainRunLoop, UITrackingRunLoopMode);
+        }
+
+        this._window = UIWindow.alloc().initWithFrame(utils.ios.getter(UIScreen, UIScreen.mainScreen).bounds);
+        // TODO: Expose Window module so that it can we styled from XML & CSS
         this._window.backgroundColor = utils.ios.getter(UIColor, UIColor.whiteColor);
 
         const args: LaunchEventData = {
@@ -117,44 +135,36 @@ class IOSApplication implements IOSApplicationDefinition {
         };
 
         notify(args);
+        notify(<LoadAppCSSEventData>{ eventName: "loadAppCss", object: <any>this, cssFile: getCssFileName() });
 
-        let rootView = createRootView(args.root);
-        this._window.content = rootView;
-
-        if (rootView instanceof Frame) {
-            this.rootController = this._window.rootViewController = rootView.ios.controller;
-        }
-        else if (rootView.ios instanceof UIViewController) {
-            this.rootController = this._window.rootViewController = rootView.ios;
-        }
-        else if (rootView.ios instanceof UIView) {
-            let newController = UIViewController.new();
-            newController.view.addSubview(rootView.ios);
-            this.rootController = newController;
-        }
-        else {
-            throw new Error("Root should be either UIViewController or UIView");
-        }
-
-        this._window.makeKeyAndVisible();
+        this.setWindowContent(args.root);
     }
 
+    @profile
     private didBecomeActive(notification: NSNotification) {
-        let ios = utils.ios.getter(UIApplication, UIApplication.sharedApplication);
-        let object = this;
+        const ios = utils.ios.getter(UIApplication, UIApplication.sharedApplication);
+        const object = this;
         notify(<ApplicationEventData>{ eventName: resumeEvent, object, ios });
-        if (!displayedOnce) {
-            notify(<ApplicationEventData>{ eventName: displayedEvent, object, ios });
-            displayedOnce = true;
+        const rootView = this._rootView;
+        if (rootView && !rootView.isLoaded) {
+            rootView.callLoaded();
         }
     }
 
     private didEnterBackground(notification: NSNotification) {
         notify(<ApplicationEventData>{ eventName: suspendEvent, object: this, ios: utils.ios.getter(UIApplication, UIApplication.sharedApplication) });
+        const rootView = this._rootView;
+        if (rootView && rootView.isLoaded) {
+            rootView.callUnloaded();
+        }
     }
 
     private willTerminate(notification: NSNotification) {
         notify(<ApplicationEventData>{ eventName: exitEvent, object: this, ios: utils.ios.getter(UIApplication, UIApplication.sharedApplication) });
+        const rootView = this._rootView;
+        if (rootView && rootView.isLoaded) {
+            rootView.callUnloaded();
+        }
     }
 
     private didReceiveMemoryWarning(notification: NSNotification) {
@@ -190,32 +200,62 @@ class IOSApplication implements IOSApplicationDefinition {
             });
         }
     }
+
+    public _onLivesync(): void {
+        // If view can't handle livesync set window controller.
+        if (!this._rootView._onLivesync()) {
+            this.setWindowContent();
+        }
+    }
+
+    public setWindowContent(view?: View): void {
+        const rootView = createRootView(view);
+        this._rootView = rootView;
+        const controller = getViewController(rootView);
+
+        if (createRootFrame) {
+            // Don't setup as styleScopeHost
+            rootView._setupUI({});
+        } else {
+            // setup view as styleScopeHost
+            rootView._setupAsRootView({});
+        }
+
+        const haveController = this._window.rootViewController !== null;
+        this._window.rootViewController = controller;
+        if (!haveController) {
+            this._window.makeKeyAndVisible();
+        }
+    }
 }
 
 const iosApp = new IOSApplication();
 exports.ios = iosApp;
 setApplication(iosApp);
 
+// attach on global, so it can be overwritten in NativeScript Angular
+(<any>global).__onLiveSyncCore = function () {
+    iosApp._onLivesync();
+}
+
 let mainEntry: NavigationEntry;
 function createRootView(v?: View) {
     let rootView = v;
-    let frame: Frame;
-    let main: string | NavigationEntry;
     if (!rootView) {
         // try to navigate to the mainEntry (if specified)
-        main = mainEntry;
-        if (main) {
-            frame = new Frame();
-            frame.navigate(main);
+        if (mainEntry) {
+            if (createRootFrame) {
+                const frame = rootView = new Frame();
+                frame.navigate(mainEntry);
+            } else {
+                rootView = createViewFromEntry(mainEntry);
+            }
         } else {
             // TODO: Throw an exception?
             throw new Error("A Frame must be used to navigate to a Page.");
         }
-
-        rootView = frame;
     }
 
-    rootView._setupAsRootView({});
     return rootView;
 }
 
@@ -223,6 +263,8 @@ export function getMainEntry() {
     return mainEntry;
 }
 
+// NOTE: for backwards compatibility. Remove for 4.0.0.
+let createRootFrame = true;
 let started: boolean = false;
 export function start(entry?: string | NavigationEntry) {
     mainEntry = typeof entry === "string" ? { moduleName: entry } : entry;
@@ -232,23 +274,47 @@ export function start(entry?: string | NavigationEntry) {
         // Normal NativeScript app will need UIApplicationMain. 
         UIApplicationMain(0, null, null, iosApp && iosApp.delegate ? NSStringFromClass(<any>iosApp.delegate) : NSStringFromClass(Responder));
     } else {
-        let rootView = createRootView();
+        // TODO: this rootView should be held alive until rootController dismissViewController is called.
+        const rootView = createRootView();
         if (rootView) {
             // Attach to the existing iOS app
-            var window = iosApp.nativeApp.keyWindow || (iosApp.nativeApp.windows.count > 0 && iosApp.nativeApp.windows[0]);
+            const window = iosApp.nativeApp.keyWindow || (iosApp.nativeApp.windows.count > 0 && iosApp.nativeApp.windows[0]);
             if (window) {
-                var rootController = window.rootViewController;
+                const rootController = window.rootViewController;
                 if (rootController) {
-                    rootController.presentViewControllerAnimatedCompletion(rootView.ios.controller, true, null);
-                    ios._layoutRootView(rootView, utils.ios.getter(UIScreen, UIScreen.mainScreen).bounds);
+                    const controller = getViewController(rootView);
+                    rootView._setupAsRootView({});
+                    rootController.presentViewControllerAnimatedCompletion(controller, true, null);
                 }
             }
         }
     }
 }
 
+export function run(entry?: string | NavigationEntry) {
+    createRootFrame = false;
+    start(entry);
+}
+
 export function getNativeApplication(): UIApplication {
     return iosApp.nativeApp;
+}
+
+function getViewController(view: View): UIViewController {
+    let viewController: UIViewController = view.viewController || view.ios;
+    if (viewController instanceof UIViewController) {
+        return viewController;
+    } else {
+        const nativeView = view.ios || view.nativeViewProtected;
+        if (nativeView instanceof UIView) {
+            viewController = iosView.UILayoutViewController.initWithOwner(new WeakRef(view)) as UIViewController;
+            viewController.view.addSubview(nativeView);
+            view.viewController = viewController;
+            return viewController;
+        }
+    }
+
+    throw new Error("Root should be either UIViewController or UIView");
 }
 
 global.__onLiveSync = function () {

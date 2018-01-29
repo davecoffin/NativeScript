@@ -1,5 +1,36 @@
 Cross Platform Modules Changelog
 ==============================
+## 3.4.0 (2017, December 20)
+
+## Fixed
+- [(# 5047)](https://github.com/NativeScript/NativeScript/pull/5047) Android: Click next moves the focus to next focusable TextField
+- [(# 5046)](https://github.com/NativeScript/NativeScript/pull/5046) Android: Fix search-bar bug
+- [(# 5019)](https://github.com/NativeScript/NativeScript/issues/5019) IOS: App crash on low memory notification with custom fonts
+- [(# 4993)](https://github.com/NativeScript/NativeScript/issues/4993) ScrollView base: Adding listener when you are supposed to remove it
+
+### New
+- [(# 4871)](https://github.com/NativeScript/NativeScript/issues/4871) Application Settings blocks UI thread
+- [(# 2992)](https://github.com/NativeScript/NativeScript/issues/2992) CSS background shorthand property
+
+
+## 3.3.0 (2017, October 25)
+
+### Fixed
+- [(# 4959)](https://github.com/NativeScript/NativeScript/pull/4959) Android: a crash related to ConstantState drawable on API 23
+- [(# 4950)](https://github.com/NativeScript/NativeScript/issues/4950) Android: a crash when application is suspended
+- [(# 4897)](https://github.com/NativeScript/NativeScript/issues/4897) Android: Button listener missing owner
+- [(# 4851)](https://github.com/NativeScript/NativeScript/issues/4851) Android: DatePicker shows wrong month
+- [(# 4895)](https://github.com/NativeScript/NativeScript/issues/4895) Android: default page transtion in app.ts is not working for the initial page & breaks navigation
+- [(# 4963)](https://github.com/NativeScript/NativeScript/pull/4963) IOS: fix missing borderRadius on Image
+- [(# 4740)](https://github.com/NativeScript/NativeScript/issues/4740) IOS: Button:highlighted stops working after 2nd click
+- [(# 4678)](https://github.com/NativeScript/NativeScript/issues/4678) ListView w/"itemTemplates" (multiple templates) cannot be used with TabView
+
+### New
+- [(# 4767)](https://github.com/NativeScript/NativeScript/pull/4767) [(# 4721)](https://github.com/NativeScript/NativeScript/pull/4721) [(# 4715)](https://github.com/NativeScript/NativeScript/pull/4715) CSS related optimizations
+- [(# 4930)](https://github.com/NativeScript/NativeScript/pull/4930) Chrome DevTools Elements tab support
+- [(# 4922)](https://github.com/NativeScript/NativeScript/pull/4922) Update platform declarations to iOS 11
+- [(# 3076)](https://github.com/NativeScript/nativescript-cli/issues/3076) Setup scripts now support Silent Install mode
+
 
 ## 3.2.0 (2017, September 07)
 

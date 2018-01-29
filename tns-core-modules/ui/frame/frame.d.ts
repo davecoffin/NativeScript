@@ -110,8 +110,9 @@ export class Frame extends View {
     /**
      * @private
      * @param entry to set as current
+     * @param isBack true when we set current because of back navigation.
      */
-    setCurrent(entry: BackstackEntry): void;
+    setCurrent(entry: BackstackEntry, isBack: boolean): void;
     /**
      * @private
      */
@@ -120,6 +121,10 @@ export class Frame extends View {
      * @private
      */
     navigationBarHeight: number;
+    /**
+     * @private
+     */
+    _currentEntry: BackstackEntry;
     /**
      * @private
      */
@@ -136,6 +141,14 @@ export class Frame extends View {
      * @private
      */
     _findEntryForTag(fragmentTag: string): BackstackEntry;
+    /**
+     * @private
+     */
+    _updateBackstack(entry: BackstackEntry, isBack: boolean): void;
+    /**
+     * @private
+     */
+    _isBack?: boolean;
     //@endprivate
 
     /**
@@ -284,6 +297,22 @@ export interface BackstackEntry {
      * @private
      */
     fragmentTag: string;
+    /**
+     * @private
+     */
+    fragment?: any;
+    /**
+     * @private
+     */
+    viewSavedState?: any;
+    /**
+     * @private
+     */
+    frameId?: number;
+    /**
+     * @private
+     */
+    recreated?: boolean;
     //@endprivate
 }
 
@@ -344,7 +373,7 @@ export interface AndroidFrame extends Observable {
      * Finds the native android.app.Fragment instance created for the specified Page.
      * @param page The Page instance to search for.
      */
-    fragmentForPage(page: Page): any;
+    fragmentForPage(entry: BackstackEntry): any;
 }
 
 export interface AndroidActivityCallbacks {
@@ -366,6 +395,7 @@ export interface AndroidFragmentCallbacks {
     onSaveInstanceState(fragment: any, outState: any, superFunc: Function): void;
     onDestroyView(fragment: any, superFunc: Function): void;
     onDestroy(fragment: any, superFunc: Function): void;
+    onStop(fragment: any, superFunc: Function): void;
     toStringOverride(fragment: any, superFunc: Function): string;
 }
 
@@ -401,10 +431,6 @@ export function setActivityCallbacks(activity: any /*android.app.Activity*/): vo
  * @private
  */
 export function reloadPage(): void;
-/**
- * @private
- */
-export function resolvePageFromEntry(entry: NavigationEntry): Page;
 /**
  * @private
  */

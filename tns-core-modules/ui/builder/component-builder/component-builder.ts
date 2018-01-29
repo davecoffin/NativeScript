@@ -7,9 +7,11 @@ import { isEventOrGesture } from "../../core/bindable";
 import { File, path, knownFolders } from "../../../file-system";
 import { getBindingOptions, bindingConstants } from "../binding-builder";
 import { resolveFileName } from "../../../file-system/file-name-resolver";
-import { profile } from "tns-core-modules/profiling";
+import { profile } from "../../../profiling";
 import * as debugModule from "../../../utils/debug";
 import * as platform from "../../../platform";
+
+import * as filesystem from "../../../file-system";
 
 const UI_PATH = "ui/";
 const MODULES = {
@@ -119,17 +121,18 @@ const applyComponentCss = profile("applyComponentCss", (instance: View, moduleNa
 
     if (typeof (<any>instance).addCssFile === "function") {//instance instanceof Page) {
         if (moduleNamePath && !cssApplied) {
+
+            const appPath = filesystem.knownFolders.currentApp().path;
+            const cssPathRelativeToApp = (moduleNamePath.startsWith(appPath) ? "./" + moduleNamePath.substr(appPath.length + 1) : moduleNamePath) + ".css";
+            if (global.moduleExists(cssPathRelativeToApp)) {
+                (<any>instance).addCssFile(cssPathRelativeToApp);
+            }
+
             let cssFilePath = resolveFileName(moduleNamePath, "css");
             if (cssFilePath) {
                 (<any>instance).addCssFile(cssFilePath);
                 cssApplied = true;
             }
-        }
-
-        if (!cssApplied) {
-            // Called only to apply application css.
-            // If we have page css (through file or cssAttribute) we have appCss applied.
-            (<any>instance)._refreshCss();
         }
     }
 });
@@ -171,13 +174,16 @@ const applyComponentAttributes = profile("applyComponentAttributes", (instance: 
     }
 });
 
-export function getComponentModule(elementName: string, namespace: string, attributes: Object, moduleExports: Object, moduleNamePath?: string): ComponentModule {
+export function getComponentModule(elementName: string, namespace: string, attributes: Object, moduleExports: Object, moduleNamePath?: string, isRootComponent?: boolean): ComponentModule {
     // Support lower-case-dashed component declaration in the XML (https://github.com/NativeScript/NativeScript/issues/309).
     elementName = elementName.split("-").map(s => { return s[0].toUpperCase() + s.substring(1) }).join("");
 
     const { instance, instanceModule } = createComponentInstance(elementName, namespace);
     moduleExports = getComponentModuleExports(instance, moduleExports, attributes);
-    applyComponentCss(instance, moduleNamePath, attributes);
+    if (isRootComponent) {
+        applyComponentCss(instance, moduleNamePath, attributes);
+    }
+
     applyComponentAttributes(instance, instanceModule, moduleExports, attributes);
 
     var componentModule;
@@ -211,13 +217,7 @@ export function setPropertyValue(instance: View, instanceModule: Object, exports
         instance[propertyName] = exports[propertyValue];
     }
     else {
-        let attrHandled = false;
-        if (!attrHandled && instance._applyXmlAttribute) {
-            attrHandled = instance._applyXmlAttribute(propertyName, propertyValue);
-        }
-        if (!attrHandled) {
-            instance[propertyName] = propertyValue;
-        }
+        instance[propertyName] = propertyValue;
     }
 }
 

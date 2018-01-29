@@ -2,6 +2,12 @@
 require("globals");
 
 import { Observable, EventData } from "../data/observable";
+import {
+    trace as profilingTrace,
+    time,
+    uptime,
+    level as profilingLevel,
+} from "../profiling";
 
 const events = new Observable();
 let launched = false;
@@ -11,13 +17,24 @@ function setLaunched() {
 }
 events.on("launch", setLaunched);
 
+if (profilingLevel() > 0) {
+    events.on("displayed", () => {
+        const duration = uptime();
+        const end = time();
+        const start = end - duration;
+        profilingTrace(`Displayed in ${duration.toFixed(2)}ms`, start, end);
+    });
+}
+
 export function hasLaunched(): boolean {
     return launched;
 }
 
 export { Observable };
 
-import { UnhandledErrorEventData, iOSApplication, AndroidApplication, CssChangedEventData } from ".";
+import { UnhandledErrorEventData, iOSApplication, AndroidApplication, CssChangedEventData, LoadAppCSSEventData } from ".";
+
+export { UnhandledErrorEventData, CssChangedEventData, LoadAppCSSEventData };
 
 export const launchEvent = "launch";
 export const suspendEvent = "suspend";
@@ -28,7 +45,7 @@ export const lowMemoryEvent = "lowMemory";
 export const uncaughtErrorEvent = "uncaughtError";
 export const orientationChangedEvent = "orientationChanged";
 
-let cssFile: string = "app.css";
+let cssFile: string = "./app.css";
 
 let resources: any = {};
 
@@ -54,7 +71,11 @@ export function setApplication(instance: iOSApplication | AndroidApplication): v
 }
 
 export function livesync() {
-    events.notify(<EventData>{ eventName: "livesync", object: app });  
+    events.notify(<EventData>{ eventName: "livesync", object: app });
+    const liveSyncCore = global.__onLiveSyncCore;
+    if (liveSyncCore) {
+        liveSyncCore();
+    }
 }
 
 export function setCssFileName(cssFileName: string) {
@@ -64,6 +85,10 @@ export function setCssFileName(cssFileName: string) {
 
 export function getCssFileName(): string {
     return cssFile;
+}
+
+export function loadAppCss(): void {
+    events.notify(<LoadAppCSSEventData>{ eventName: "loadAppCss", object: app, cssFile: getCssFileName() });
 }
 
 export function addCss(cssText: string): void {

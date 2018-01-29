@@ -56,12 +56,9 @@ export class ListView extends ListViewBase {
 
         const listView = new android.widget.ListView(this._context);
         listView.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        this.updateEffectiveRowHeight();
 
         // Fixes issue with black random black items when scrolling
         listView.setCacheColorHint(android.graphics.Color.TRANSPARENT);
-
-        // listView.setId(this._androidViewId);
 
         ensureListViewAdapterClass();
         const adapter = new ListViewAdapterClass(this);
@@ -77,6 +74,8 @@ export class ListView extends ListViewBase {
 
     public initNativeView(): void {
         super.initNativeView();
+        this.updateEffectiveRowHeight();
+
         const nativeView: any = this.nativeViewProtected;
         (<any>nativeView).itemClickListener.owner = this;
         const adapter = (<any>nativeView).adapter;
@@ -95,6 +94,12 @@ export class ListView extends ListViewBase {
         (<any>nativeView).adapter.owner = null;
         this.clearRealizedCells();
         super.disposeNativeView();
+    }
+
+    public onLoaded() {
+        super.onLoaded();
+        // Without this call itemClick won't be fired... :(
+        this.requestLayout();
     }
 
     public refresh() {
@@ -216,14 +221,19 @@ function ensureListViewAdapterClass() {
         public getItem(i: number) {
             if (this.owner && this.owner.items && i < this.owner.items.length) {
                 let getItem = (<ItemsSource>this.owner.items).getItem;
-                return getItem ? getItem(i) : this.owner.items[i];
+                return getItem ? getItem.call(this.owner.items, i) : this.owner.items[i];
             }
 
             return null;
         }
 
         public getItemId(i: number) {
-            return long(i);
+            let item = this.getItem(i);
+            let id = i;
+            if (this.owner && item && this.owner.items) {
+                id = this.owner.itemIdGenerator(item, i, this.owner.items);
+            }
+            return long(id);
         }
 
         public hasStableIds(): boolean {

@@ -3,10 +3,9 @@ import {
     ContentView, View, eachDescendant, Property, CssProperty, Color, isIOS,
     booleanConverter, resetCSSProperties, Style, EventData
 } from "../content-view";
-import { Frame, topmost as topmostFrame, resolvePageFromEntry } from "../frame";
+import { Frame, topmost as topmostFrame } from "../frame";
 import { ActionBar } from "../action-bar";
 import { KeyframeAnimationInfo } from "../animation/keyframe-animation";
-import { StyleScope } from "../styling/style-scope";
 import { File, path, knownFolders } from "../../file-system";
 import { profile } from "../../profiling";
 
@@ -18,45 +17,24 @@ export class PageBase extends ContentView implements PageDefinition {
     public static navigatedToEvent = "navigatedTo";
     public static navigatingFromEvent = "navigatingFrom";
     public static navigatedFromEvent = "navigatedFrom";
-    public static shownModallyEvent = "shownModally";
-    public static showingModallyEvent = "showingModally";
-
-    protected _closeModalCallback: Function;
-    private _modalContext: any;
-
+  
     private _navigationContext: any;
-
     private _actionBar: ActionBar;
-    private _cssAppliedVersion: number;
 
-    public _styleScope: StyleScope; // same as in ViewBase, but strongly typed
-    public _modal: PageBase;
-    public _fragmentTag: string;
+    public _frame: Frame;
     
     public actionBarHidden: boolean;
     public enableSwipeBackNavigation: boolean;
     public backgroundSpanUnderStatusBar: boolean;
-
-    constructor() {
-        super();
-        this._styleScope = new StyleScope();
-    }
-
+    public hasActionBar: boolean;
+    
     get navigationContext(): any {
         return this._navigationContext;
     }
 
-    get css(): string {
-        return this._styleScope.css;
-    }
-    set css(value: string) {
-        this._styleScope.css = value;
-        this._cssFiles = {};
-        this._refreshCss();
-    }
-
     get actionBar(): ActionBar {
         if (!this._actionBar) {
+            this.hasActionBar = true;
             this._actionBar = new ActionBar();
             this._addView(this._actionBar);
         }
@@ -71,6 +49,7 @@ export class PageBase extends ContentView implements PageDefinition {
             if (this._actionBar) {
                 this._removeView(this._actionBar);
             }
+            this.hasActionBar = true;
             this._actionBar = value;
             this._addView(this._actionBar);
         }
@@ -94,58 +73,11 @@ export class PageBase extends ContentView implements PageDefinition {
         return this;
     }
 
-    @profile
-    public onLoaded(): void {
-        this._refreshCss();
-        super.onLoaded();
-    }
-
-    public onUnloaded() {
-        const styleScope = this._styleScope;
-        super.onUnloaded();
-        this._styleScope = styleScope;
-    }
-
-    public addCss(cssString: string): void {
-        this._addCssInternal(cssString);
-    }
-
-    private _addCssInternal(cssString: string, cssFileName?: string): void {
-        this._styleScope.addCss(cssString, cssFileName);
-        this._refreshCss();
-    }
-
-    private _cssFiles = {};
-    public addCssFile(cssFileName: string) {
-        if (cssFileName.indexOf("~/") === 0) {
-            cssFileName = path.join(knownFolders.currentApp().path, cssFileName.replace("~/", ""));
-        }
-        if (!this._cssFiles[cssFileName]) {
-            if (File.exists(cssFileName)) {
-                const file = File.fromPath(cssFileName);
-                const text = file.readTextSync();
-                if (text) {
-                    this._addCssInternal(text, cssFileName);
-                    this._cssFiles[cssFileName] = true;
-                }
-            }
-        }
-    }
-
-    // Used in component-builder.ts
-    public _refreshCss(): void {
-        const scopeVersion = this._styleScope.ensureSelectors();
-        if (scopeVersion !== this._cssAppliedVersion) {
-            const styleScope = this._styleScope;
-            this._resetCssValues();
-            const checkSelectors = (view: View): boolean => {
-                styleScope.applySelectors(view);
-                return true;
-            };
-
-            checkSelectors(this);
-            eachDescendant(this, checkSelectors);
-            this._cssAppliedVersion = scopeVersion;
+    public _addChildFromBuilder(name: string, value: any) {
+        if (value instanceof ActionBar) {
+            this.actionBar = value;
+        } else {
+            super._addChildFromBuilder(name, value);
         }
     }
 
@@ -157,7 +89,7 @@ export class PageBase extends ContentView implements PageDefinition {
         const frame = this.parent;
         return frame instanceof Frame ? frame : undefined;
     }
-
+    
     private createNavigatedData(eventName: string, isBackNavigation: boolean): NavigatedData {
         return {
             eventName: eventName,
@@ -195,110 +127,15 @@ export class PageBase extends ContentView implements PageDefinition {
         this._navigationContext = undefined;
     }
 
-    public showModal(): PageBase {
-        if (arguments.length === 0) {
-            this._showNativeModalView(<any>topmostFrame().currentPage, undefined, undefined, true);
-            return this;
-        } else {
-            const context: any = arguments[1];
-            const closeCallback: Function = arguments[2];
-            const fullscreen: boolean = arguments[3];
-
-            let page: PageBase;
-            if (arguments[0] instanceof PageBase) {
-                page = arguments[0];
-            } else {
-                page = <PageBase>resolvePageFromEntry({ moduleName: arguments[0] });
-            }
-
-            page._showNativeModalView(this, context, closeCallback, fullscreen);
-            return page;
-        }
-    }
-
-    public closeModal() {
-        if (this._closeModalCallback) {
-            this._closeModalCallback.apply(undefined, arguments);
-        }
-    }
-
-    public get modal(): PageBase {
-        return this._modal;
-    }
-
-    public _addChildFromBuilder(name: string, value: any) {
-        if (value instanceof ActionBar) {
-            this.actionBar = value;
-        }
-        else {
-            super._addChildFromBuilder(name, value);
-        }
-    }
-
-    protected _showNativeModalView(parent: PageBase, context: any, closeCallback: Function, fullscreen?: boolean) {
-        parent._modal = this;
-        const that = this;
-        this._modalContext = context;
-        this._closeModalCallback = function () {
-            if (that._closeModalCallback) {
-                that._closeModalCallback = null;
-                that._modalContext = null;
-                that._hideNativeModalView(parent);
-                if (typeof closeCallback === "function") {
-                    closeCallback.apply(undefined, arguments);
-                }
-            }
-        };
-    }
-
-    protected _hideNativeModalView(parent: PageBase) {
-        //
-    }
-
-    public _raiseShownModallyEvent() {
-        let args: ShownModallyData = {
-            eventName: PageBase.shownModallyEvent,
-            object: this,
-            context: this._modalContext,
-            closeCallback: this._closeModalCallback
-        };
-        this.notify(args);
-    }
-
-    protected _raiseShowingModallyEvent() {
-        let args: ShownModallyData = {
-            eventName: PageBase.showingModallyEvent,
-            object: this,
-            context: this._modalContext,
-            closeCallback: this._closeModalCallback
-        }
-        this.notify(args);
-    }
-
-    public _getStyleScope(): StyleScope {
-        return this._styleScope;
-    }
-
     public eachChildView(callback: (child: View) => boolean) {
         super.eachChildView(callback);
-        callback(this.actionBar);
+        if (this.actionBar) {
+            callback(this.actionBar);
+        }
     }
 
     get _childrenCount(): number {
-        return (this.content ? 1 : 0) + (this.actionBar ? 1 : 0);
-    }
-
-    private _resetCssValues() {
-        const resetCssValuesFunc = (view: View): boolean => {
-            view._batchUpdate(() => {
-                view._cancelAllAnimations();
-                resetCSSProperties(view.style);
-            });
-            return true;
-        };
-
-        resetCssValuesFunc(this);
-        eachDescendant(this, resetCssValuesFunc);
+        return (this.content ? 1 : 0) + (this._actionBar ? 1 : 0);
     }
 }
 

@@ -8,6 +8,7 @@ import { StackLayout } from "../layouts/stack-layout";
 import { ProxyViewContainer } from "../proxy-view-container";
 import { ios } from "../../utils/utils";
 import { profile } from "../../profiling";
+import { device } from "../../platform";
 
 export * from "./list-view-common";
 
@@ -218,7 +219,6 @@ export class ListView extends ListViewBase {
         super();
         this.nativeViewProtected = this._ios = UITableView.new();
         this._ios.registerClassForCellReuseIdentifier(ListViewCell.class(), this._defaultTemplate.key);
-        this._ios.autoresizingMask = UIViewAutoresizing.None;
         this._ios.estimatedRowHeight = DEFAULT_HEIGHT;
         this._ios.rowHeight = UITableViewAutomaticDimension;
         this._ios.dataSource = this._dataSource = DataSource.initWithOwner(new WeakRef(this));
@@ -394,7 +394,11 @@ export class ListView extends ListViewBase {
             this._removeView(view.parent);
         }
 
+        // No need to request layout when we are removing cells.
+        const preparing = this._preparingCell;
+        this._preparingCell = true;
         view.parent._removeView(view);
+        this._preparingCell = preparing;
         this._map.delete(cell);
     }
 

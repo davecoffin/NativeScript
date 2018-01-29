@@ -122,6 +122,10 @@ export class Property<T extends ViewBase, U> implements TypedPropertyDescriptor<
             const changed: boolean = equalityComparer ? !equalityComparer(oldValue, value) : oldValue !== value;
 
             if (wrapped || changed) {
+                if (affectsLayout) {
+                    this.requestLayout();
+                }
+                
                 if (reset) {
                     delete this[key];
                     if (valueChanged) {
@@ -162,10 +166,6 @@ export class Property<T extends ViewBase, U> implements TypedPropertyDescriptor<
 
                 if (this.hasListeners(eventName)) {
                     this.notify<PropertyChangeData>({ object: this, eventName, propertyName, value, oldValue });
-                }
-
-                if (affectsLayout) {
-                    this.requestLayout();
                 }
 
                 if (this.domNode) {
@@ -465,17 +465,17 @@ export class CssProperty<T extends Style, U> implements definitions.CssProperty<
 
         const property = this;
 
-        function setLocalValue(this: T, value: U): void {
-            const reset = value === unsetValue;
+        function setLocalValue(this: T, newValue: U | string): void {
+            const reset = newValue === unsetValue || newValue === "";
+            let value: U;
             if (reset) {
                 value = defaultValue;
                 delete this[sourceKey];
-            }
-            else {
+            } else {
                 this[sourceKey] = ValueSource.Local;
-                if (valueConverter && typeof value === "string") {
-                    value = valueConverter(value);
-                }
+                value = (valueConverter && typeof newValue === "string") ?
+                    valueConverter(newValue) :
+                    <U>newValue;
             }
 
             const oldValue: U = key in this ? this[key] : defaultValue;
@@ -533,8 +533,7 @@ export class CssProperty<T extends Style, U> implements definitions.CssProperty<
             }
         }
 
-        function setCssValue(this: T, value: U): void {
-            const reset = value === unsetValue;
+        function setCssValue(this: T, newValue: U | string): void {
             const currentValueSource: number = this[sourceKey] || ValueSource.Default;
 
             // We have localValueSource - NOOP.
@@ -542,13 +541,15 @@ export class CssProperty<T extends Style, U> implements definitions.CssProperty<
                 return;
             }
 
+            const reset = newValue === unsetValue || newValue === "";
+            let value: U;
             if (reset) {
                 value = defaultValue;
                 delete this[sourceKey];
             } else {
-                if (valueConverter && typeof value === "string") {
-                    value = valueConverter(value);
-                }
+                value = valueConverter && typeof newValue === "string" ?
+                    valueConverter(newValue) :
+                    <U>newValue;
                 this[sourceKey] = ValueSource.Css;
             }
 
@@ -646,9 +647,10 @@ export class CssProperty<T extends Style, U> implements definitions.CssProperty<
 }
 CssProperty.prototype.isStyleProperty = true;
 
-export class CssAnimationProperty<T extends Style, U> {
+export class CssAnimationProperty<T extends Style, U> implements definitions.CssAnimationProperty<T, U> {
     public readonly name: string;
     public readonly cssName: string;
+    public readonly cssLocalName: string;
 
     public readonly getDefault: symbol;
     public readonly setNative: symbol;
@@ -682,7 +684,9 @@ export class CssAnimationProperty<T extends Style, U> {
 
         this._valueConverter = options.valueConverter;
 
-        const cssName = "css:" + (options.cssName || propertyName);
+        const cssLocalName = (options.cssName || propertyName);
+        this.cssLocalName = cssLocalName;
+        const cssName = "css:" + cssLocalName;
         this.cssName = cssName;
 
         const keyframeName = "keyframe:" + propertyName;
@@ -713,13 +717,14 @@ export class CssAnimationProperty<T extends Style, U> {
             return {
                 enumerable, configurable,
                 get: getsComputed ? function (this: T) { return this[computedValue]; } : function (this: T) { return this[symbol]; },
-                set(this: T, boxedValue: U) {
+                set(this: T, boxedValue: U | string) {
 
                     const oldValue = this[computedValue];
                     const oldSource = this[computedSource];
                     const wasSet = oldSource !== ValueSource.Default;
-
-                    if (boxedValue === unsetValue) {
+                    const reset = boxedValue === unsetValue || boxedValue === "";
+        
+                    if (reset) {
                         this[symbol] = unsetValue;
                         if (this[computedSource] === propertySource) {
                             // Fallback to lower value source.
@@ -824,6 +829,10 @@ export class CssAnimationProperty<T extends Style, U> {
         return this.properties[name];
     }
 
+    public static _getPropertyNames(): string[] {
+        return Object.keys(CssAnimationProperty.properties);
+    }
+
     public isSet(instance: T): boolean {
         return instance[this.source] !== ValueSource.Default;
     }
@@ -853,7 +862,7 @@ export class InheritedCssProperty<T extends Style, U> extends CssProperty<T, U> 
         const property = this;
 
         const setFunc = (valueSource: ValueSource) => function (this: T, boxedValue: any): void {
-            const reset = boxedValue === unsetValue;
+            const reset = boxedValue === unsetValue || boxedValue === "";
             const currentValueSource: number = this[sourceKey] || ValueSource.Default;
             if (reset) {
                 // If we want to reset cssValue and we have localValue - return;
@@ -866,8 +875,10 @@ export class InheritedCssProperty<T extends Style, U> extends CssProperty<T, U> 
                 }
             }
 
+            const oldValue: U = key in this ? this[key] : defaultValue;
             const view = this.view;
             let value: U;
+            let unsetNativeValue = false;
             if (reset) {
                 // If unsetValue - we want to reset this property.
                 let parent = view.parent;
@@ -876,9 +887,12 @@ export class InheritedCssProperty<T extends Style, U> extends CssProperty<T, U> 
                 if (style && style[sourceKey] > ValueSource.Default) {
                     value = style[propertyName];
                     this[sourceKey] = ValueSource.Inherited;
+                    this[key] = value;
                 } else {
                     value = defaultValue;
                     delete this[sourceKey];
+                    delete this[key];
+                    unsetNativeValue = true;
                 }
             } else {
                 this[sourceKey] = valueSource;
@@ -887,43 +901,29 @@ export class InheritedCssProperty<T extends Style, U> extends CssProperty<T, U> 
                 } else {
                     value = boxedValue;
                 }
+                this[key] = value;
             }
 
-            const oldValue: U = key in this ? this[key] : defaultValue;
             const changed: boolean = equalityComparer ? !equalityComparer(oldValue, value) : oldValue !== value;
 
             if (changed) {
                 const view = this.view;
-                if (reset) {
-                    delete this[key];
-                    if (valueChanged) {
-                        valueChanged(this, oldValue, value);
-                    }
+                if (valueChanged) {
+                    valueChanged(this, oldValue, value);
+                }
 
-                    if (view[setNative]) {
-                        if (view._suspendNativeUpdatesCount) {
-                            if (view._suspendedUpdates) {
-                                view._suspendedUpdates[propertyName] = property;
-                            }
-                        } else {
+                if (view[setNative]) {
+                    if (view._suspendNativeUpdatesCount) {
+                        if (view._suspendedUpdates) {
+                            view._suspendedUpdates[propertyName] = property;
+                        }
+                    } else {
+                        if (unsetNativeValue) {
                             if (defaultValueKey in this) {
                                 view[setNative](this[defaultValueKey]);
                                 delete this[defaultValueKey];
                             } else {
                                 view[setNative](defaultValue);
-                            }
-                        }
-                    }
-                } else {
-                    this[key] = value;
-                    if (valueChanged) {
-                        valueChanged(this, oldValue, value);
-                    }
-
-                    if (view[setNative]) {
-                        if (view._suspendNativeUpdatesCount) {
-                            if (view._suspendedUpdates) {
-                                view._suspendedUpdates[propertyName] = property;
                             }
                         } else {
                             if (!(defaultValueKey in this)) {
@@ -981,6 +981,7 @@ export class ShorthandProperty<T extends Style, P> implements definitions.Shorth
 
     protected readonly cssValueDescriptor: PropertyDescriptor;
     protected readonly localValueDescriptor: PropertyDescriptor;
+    protected readonly propertyBagDescriptor: PropertyDescriptor;
 
     public readonly sourceKey: symbol;
 
@@ -1025,19 +1026,32 @@ export class ShorthandProperty<T extends Style, P> implements definitions.Shorth
             set: setLocalValue
         };
 
+        this.propertyBagDescriptor = {
+            enumerable: false,
+            configurable: true,
+            set(value: string) {
+                converter(value).forEach(([property, value]) => {
+                    this[property.cssLocalName] = value;
+                });
+            }
+        }
+
         cssSymbolPropertyMap[key] = this;
     }
 
-    public register(cls: { prototype: T }): void {
+    public register(cls: typeof Style): void {
         if (this.registered) {
             throw new Error(`Property ${this.name} already registered.`);
         }
+
         this.registered = true;
         Object.defineProperty(cls.prototype, this.name, this.localValueDescriptor);
         Object.defineProperty(cls.prototype, this.cssName, this.cssValueDescriptor);
         if (this.cssLocalName !== this.cssName) {
             Object.defineProperty(cls.prototype, this.cssLocalName, this.localValueDescriptor);
         }
+
+        Object.defineProperty(cls.prototype.PropertyBag, this.cssLocalName, this.propertyBagDescriptor);
     }
 }
 
@@ -1294,5 +1308,11 @@ export function getComputedCssValues(view: ViewBase): [string, any][] {
     for (var prop of cssPropertyNames) {
         result.push([prop, style[prop]]);
     }
+
+    // Add these to enable box model in chrome-devtools styles tab
+    result.push(["top", "auto"]);
+    result.push(["left", "auto"]);
+    result.push(["bottom", "auto"]);
+    result.push(["right", "auto"]);
     return result;
 }

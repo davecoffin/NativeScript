@@ -35,6 +35,7 @@ export class Style extends Observable implements StyleDefinition {
     public tintColor: Color;
     public placeholderColor: Color;
 
+    public background: string;
     public backgroundColor: Color;
     public backgroundImage: string;
     public backgroundRepeat: BackgroundRepeat;
@@ -118,4 +119,7 @@ export class Style extends Observable implements StyleDefinition {
     public flexShrink: FlexShrink;
     public flexWrapBefore: FlexWrapBefore;
     public alignSelf: AlignSelf;
+
+    public PropertyBag: { new(): { [property: string]: string }, prototype: { [property: string]: string } };
 }
+Style.prototype.PropertyBag = class { [property: string]: string; }

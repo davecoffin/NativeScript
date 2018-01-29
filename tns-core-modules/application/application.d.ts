@@ -141,6 +141,14 @@ export function setCssFileName(cssFile: string): void;
  */
 export function getCssFileName(): string;
 
+/**
+ * Loads immediately the app.css.
+ * By default the app.css file is loaded shortly after "loaded".
+ * For the Android snapshot the CSS can be parsed during the snapshot generation,
+ * as the CSS does not depend on runtime APIs, and loadAppCss will be called explicitly.
+ */
+export function loadAppCss();
+
 export function addCss(cssText: string): void;
 
 /**
@@ -159,9 +167,24 @@ export function on(event: "livesync", callback: (args: EventData) => void);
 export function off(eventNames: string, callback?: any, thisArg?: any);
 
 /**
+ * Deprecated. Use application run.
  * Call this method to start the application. Important: All code after this method call will not be executed!
  */
 export function start(entry?: NavigationEntry | string);
+
+/**
+ * Call this method to run the application. Important: All code after this method call will not be executed!
+ * Compared to start this method won't create Frame as root view.
+ */
+export function run(entry?: NavigationEntry | string);
+
+//@private
+/**
+ * Internal method use to check if a root Frame should be automatically created as root view.
+ * @private
+ */
+export function shouldCreateRootFrame(): boolean;
+//@endprivate
 
 /**
  * A basic method signature to hook an event listener (shortcut alias to the addEventListener method).
@@ -553,3 +576,7 @@ export function getNativeApplication(): any;
  * Indicates if the application is allready launched. See also the `application.on("launch", handler)` event.
  */
 export function hasLaunched(): boolean;
+
+export interface LoadAppCSSEventData extends EventData {
+    cssFile: string;
+}

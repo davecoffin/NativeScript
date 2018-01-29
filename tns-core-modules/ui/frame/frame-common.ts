@@ -3,41 +3,13 @@ import { Frame as FrameDefinition, NavigationEntry, BackstackEntry, NavigationTr
 import { Page } from "../page";
 
 // Types.
-import { View, CustomLayoutView, isIOS, isAndroid, traceEnabled, traceWrite, traceCategories, EventData } from "../core/view";
+import { View, CustomLayoutView, isIOS, isAndroid, traceEnabled, traceWrite, traceCategories, EventData, Property } from "../core/view";
 import { resolveFileName } from "../../file-system/file-name-resolver";
 import { knownFolders, path } from "../../file-system";
-import { parse, loadPage } from "../builder";
-import * as application from "../../application";
-import { profile } from "tns-core-modules/profiling";
-
-export { application };
+import { parse, createViewFromEntry } from "../builder";
+import { profile } from "../../profiling";
 
 export * from "../core/view";
-
-function onLivesync(args: EventData): void {
-    // give time to allow fileNameResolver & css to reload.
-    setTimeout(() => {
-        let g = <any>global;
-        // Close the error page if available and remove the reference from global context.
-        if (g.errorPage) {
-            g.errorPage.closeModal();
-            g.errorPage = undefined;
-        }
-
-        try {
-            g.__onLiveSyncCore();
-        } catch (ex) {
-            // Show the error as modal page, save reference to the page in global context.
-            g.errorPage = parse(`<Page><ScrollView><Label text="${ex}" textWrap="true" style="color: red;" /></ScrollView></Page>`);
-            g.errorPage.showModal();
-        }
-    });
-}
-application.on("livesync", onLivesync);
-
-if (global && global.__inspector) {
-    require("tns-core-modules/debugger/devtools-elements");
-}
 
 let frameStack: Array<FrameBase> = [];
 
@@ -58,133 +30,6 @@ function buildEntryFromArgs(arg: any): NavigationEntry {
     return entry;
 }
 
-export function reloadPage(): void {
-    const frame = topmost();
-    if (frame) {
-        if (frame.currentPage && frame.currentPage.modal) {
-            frame.currentPage.modal.closeModal();
-        }
-
-        const currentEntry = frame._currentEntry.entry;
-        const newEntry: NavigationEntry = {
-            animated: false,
-            clearHistory: true,
-            context: currentEntry.context,
-            create: currentEntry.create,
-            moduleName: currentEntry.moduleName,
-            backstackVisible: currentEntry.backstackVisible
-        }
-
-        frame.navigate(newEntry);
-    }
-}
-
-// attach on global, so it can be overwritten in NativeScript Angular
-(<any>global).__onLiveSyncCore = reloadPage;
-
-const entryCreatePage = profile("entry.create", (entry: NavigationEntry): Page => {
-    const page = entry.create();
-
-    if (!page) {
-        throw new Error("Failed to create Page with entry.create() function.");
-    }
-
-    page._refreshCss();
-    return page;
-});
-
-interface PageModuleExports {
-    createPage?: () => Page;
-}
-
-const moduleCreatePage = profile("module.createPage", (moduleNamePath: string, moduleExports: PageModuleExports): Page => {
-    if (traceEnabled()) {
-        traceWrite("Calling createPage()", traceCategories.Navigation);
-    }
-    var page = moduleExports.createPage();
-
-    let cssFileName = resolveFileName(moduleNamePath, "css");
-    // If there is no cssFile only appCss will be applied at loaded.
-    if (cssFileName) {
-        page.addCssFile(cssFileName);
-    }
-    return page;
-});
-
-const loadPageModule = profile("loadPageModule", (moduleNamePath: string, entry: NavigationEntry): PageModuleExports => {
-    // web-pack case where developers register their page JS file manually.
-    if (global.moduleExists(entry.moduleName)) {
-        if (traceEnabled()) {
-            traceWrite("Loading pre-registered JS module: " + entry.moduleName, traceCategories.Navigation);
-        }
-        return global.loadModule(entry.moduleName);
-    } else {
-        let moduleExportsResolvedPath = resolveFileName(moduleNamePath, "js");
-        if (moduleExportsResolvedPath) {
-            if (traceEnabled()) {
-                traceWrite("Loading JS file: " + moduleExportsResolvedPath, traceCategories.Navigation);
-            }
-
-            // Exclude extension when doing require.
-            moduleExportsResolvedPath = moduleExportsResolvedPath.substr(0, moduleExportsResolvedPath.length - 3)
-            return global.loadModule(moduleExportsResolvedPath);
-        }
-    }
-    return null;
-});
-
-const pageFromBuilder = profile("pageFromBuilder", (moduleNamePath: string, moduleExports: any): Page => {
-    let page: Page;
-
-    // Possible XML file path.
-    let fileName = resolveFileName(moduleNamePath, "xml");
-    if (fileName) {
-        if (traceEnabled()) {
-            traceWrite("Loading XML file: " + fileName, traceCategories.Navigation);
-        }
-
-        // Or check if the file exists in the app modules and load the page from XML.
-        page = loadPage(moduleNamePath, fileName, moduleExports);
-    }
-
-    // Attempts to implement https://github.com/NativeScript/NativeScript/issues/1311
-    // if (page && fileName === `${moduleNamePath}.port.xml` || fileName === `${moduleNamePath}.land.xml`){
-    //     page["isBiOrientational"] = true;
-    // }
-
-    return page;
-});
-
-export const resolvePageFromEntry = profile("resolvePageFromEntry", (entry: NavigationEntry): Page => {
-    let page: Page;
-
-    if (entry.create) {
-        page = entryCreatePage(entry);
-    } else if (entry.moduleName) {
-        // Current app full path.
-        let currentAppPath = knownFolders.currentApp().path;
-        //Full path of the module = current app full path + module name.
-        const moduleNamePath = path.join(currentAppPath, entry.moduleName);
-        traceWrite("frame module path: " + moduleNamePath, traceCategories.Navigation);
-        traceWrite("frame module module: " + entry.moduleName, traceCategories.Navigation);
-
-        const moduleExports = loadPageModule(moduleNamePath, entry);
-
-        if (moduleExports && moduleExports.createPage) {
-            page = moduleCreatePage(moduleNamePath, moduleExports);
-        } else {
-            // cssFileName is loaded inside pageFromBuilder->loadPage
-            page = pageFromBuilder(moduleNamePath, moduleExports);
-        }
-
-        if (!page) {
-            throw new Error("Failed to load Page from entry.moduleName: " + entry.moduleName);
-        }
-    }
-
-    return page;
-});
-
 export interface NavigationContext {
     entry: BackstackEntry;
     isBackNavigation: boolean;
@@ -194,65 +39,108 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
     public static androidOptionSelectedEvent = "optionSelected";
 
     private _animated: boolean;
-    public _currentEntry: BackstackEntry;
-    private _backStack: Array<BackstackEntry>;
     private _transition: NavigationTransition;
-    private _navigationQueue: Array<NavigationContext>;
+    private _backStack = new Array<BackstackEntry>();
+    private _navigationQueue = new Array<NavigationContext>();
 
+    public _currentEntry: BackstackEntry;
+    public _executingEntry: BackstackEntry;
     public _isInFrameStack = false;
     public static defaultAnimatedNavigation = true;
     public static defaultTransition: NavigationTransition;
 
     // TODO: Currently our navigation will not be synchronized in case users directly call native navigation methods like Activity.startActivity.
 
-    constructor() {
-        super();
+    public _addChildFromBuilder(name: string, value: any) {
+        throw new Error(`Frame should not have a view. Use 'defaultPage' property instead.`);
+    }
 
-        this._backStack = new Array<BackstackEntry>();
-        this._navigationQueue = new Array<NavigationContext>();
+    @profile
+    public onLoaded() {
+        super.onLoaded();
+        this._processNextNavigationEntry();
     }
 
     public canGoBack(): boolean {
-        return this._backStack.length > 0;
+        let backstack = this._backStack.length;
+        let previousForwardNotInBackstack = false;
+        this._navigationQueue.forEach(item => {
+            const entry = item.entry;
+            if (item.isBackNavigation) {
+                previousForwardNotInBackstack = false;
+                if (!entry) {
+                    backstack--;
+                } else {
+                    const backstackIndex = this._backStack.indexOf(entry);
+                    if (backstackIndex !== -1) {
+                        backstack = backstackIndex;
+                    } else {
+                        // NOTE: We don't search for entries in navigationQueue because there is no way for 
+                        // developer to get reference to BackstackEntry unless transition is completed.
+                        // At that point the entry is put in the backstack array.
+                        // If we start to return Backstack entry from navigate method then
+                        // here we should check also navigationQueue as well.
+                        backstack--;
+                    }
+                }
+            } else if (entry.entry.clearHistory) {
+                previousForwardNotInBackstack = false;
+                backstack = 0;
+            } else {
+                backstack++;
+                if (previousForwardNotInBackstack) {
+                    backstack--;
+                }
+
+                previousForwardNotInBackstack = entry.entry.backstackVisible === false;
+            }
+        });
+
+        // this is our first navigation which is not completed yet.
+        if (this._navigationQueue.length > 0 && !this._currentEntry) {
+            backstack--;
+        }
+
+        return backstack > 0;
     }
 
     /**
      * Navigates to the previous entry (if any) in the back stack.
      * @param to The backstack entry to navigate back to.
      */
-    public goBack(backstackEntry?: BackstackEntry) {
+    public goBack(backstackEntry?: BackstackEntry): void {
         if (traceEnabled()) {
             traceWrite(`GO BACK`, traceCategories.Navigation);
         }
+
         if (!this.canGoBack()) {
-            // TODO: Do we need to throw an error?
             return;
         }
 
-        if (!backstackEntry) {
-            backstackEntry = this._backStack.pop();
-        } else {
-            let backIndex = this._backStack.indexOf(backstackEntry);
-            if (backIndex < 0) {
+        if (backstackEntry) {
+            const index = this._backStack.indexOf(backstackEntry);
+            if (index < 0) {
                 return;
             }
-            this._backStack.splice(backIndex);
         }
 
-        let navigationContext: NavigationContext = {
+        const navigationContext: NavigationContext = {
             entry: backstackEntry,
             isBackNavigation: true
         }
 
         this._navigationQueue.push(navigationContext);
+        this._processNextNavigationEntry();
+    }
 
-        if (this._navigationQueue.length === 1) {
-            this._processNavigationContext(navigationContext);
-        }
-        else {
-            if (traceEnabled()) {
-                traceWrite(`Going back scheduled`, traceCategories.Navigation);
-            }
+    public _removeEntry(removed: BackstackEntry): void {
+        const page = removed.resolvedPage;
+        const frame = page.frame;
+        page._frame = null;
+        if (frame) {
+            frame._removeView(page);
+        } else {
+            page._tearDownUI(true);
         }
     }
 
@@ -283,7 +171,7 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
         }
 
         const entry = buildEntryFromArgs(param);
-        const page = resolvePageFromEntry(entry);
+        const page = createViewFromEntry(entry) as Page;
 
         // Attempts to implement https://github.com/NativeScript/NativeScript/issues/1311
         // if (page["isBiOrientational"] && entry.moduleName && !this._subscribedToOrientationChangedEvent){
@@ -310,22 +198,59 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
         }
 
         this._navigationQueue.push(navigationContext);
-
-        if (this._navigationQueue.length === 1) {
-            this._processNavigationContext(navigationContext);
-        } else {
-            if (traceEnabled()) {
-                traceWrite(`Navigation scheduled`, traceCategories.Navigation);
-            }
-        }
+        this._processNextNavigationEntry();
     }
 
     public isCurrent(entry: BackstackEntry): boolean {
         return this._currentEntry === entry;
     }
 
-    public setCurrent(entry: BackstackEntry): void {
+    public setCurrent(entry: BackstackEntry, isBack: boolean): void {
+        const newPage = entry.resolvedPage;
+        // In case we navigated forward to a page that was in the backstack
+        // with clearHistory: true
+        if (!newPage.frame) {
+            this._addView(newPage);
+            newPage._frame = this;
+        }
+
         this._currentEntry = entry;
+        this._executingEntry = null;
+        newPage.onNavigatedTo(isBack);
+    }
+
+    public _updateBackstack(entry: BackstackEntry, isBack: boolean): void {
+        this.raiseCurrentPageNavigatedEvents(isBack);
+        const current = this._currentEntry;
+
+        if (isBack) {
+            const index = this._backStack.indexOf(entry);
+            this._backStack.splice(index + 1).forEach(e => this._removeEntry(e));
+            this._backStack.pop();
+        } else {
+            if (entry.entry.clearHistory) {
+                this._backStack.forEach(e => this._removeEntry(e));
+                this._backStack.length = 0;
+            } else if (FrameBase._isEntryBackstackVisible(current)) {
+                this._backStack.push(current);
+            }
+        }
+
+        if (current && this._backStack.indexOf(current) < 0) {
+            this._removeEntry(current);
+        }
+    }
+
+    private raiseCurrentPageNavigatedEvents(isBack: boolean) {
+        const page = this.currentPage;
+        if (page) {
+            if (page.isLoaded) {
+                // Forward navigation does not remove page from frame so we raise unloaded manually.
+                page.callUnloaded();
+            }
+
+            page.onNavigatedFrom(isBack);
+        }
     }
 
     public _processNavigationQueue(page: Page) {
@@ -334,8 +259,8 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
             return;
         }
 
-        let entry = this._navigationQueue[0].entry;
-        let currentNavigationPage = entry.resolvedPage;
+        const entry = this._navigationQueue[0].entry;
+        const currentNavigationPage = entry.resolvedPage;
         if (page !== currentNavigationPage) {
             // If the page is not the one that requested navigation - skip it.
             return;
@@ -343,12 +268,7 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
 
         // remove completed operation.
         this._navigationQueue.shift();
-
-        if (this._navigationQueue.length > 0) {
-            let navigationContext = this._navigationQueue[0];
-            this._processNavigationContext(navigationContext);
-        }
-
+        this._processNextNavigationEntry();
         this._updateActionBar();
     }
 
@@ -387,34 +307,41 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
         //traceWrite("calling _updateActionBar on Frame", traceCategories.Navigation);
     }
 
-    protected _processNavigationContext(navigationContext: NavigationContext) {
-        if (navigationContext.isBackNavigation) {
-            this.performGoBack(navigationContext);
-        } else {
-            this.performNavigation(navigationContext);
+    protected _processNextNavigationEntry() {
+        if (!this.isLoaded || this._executingEntry) {
+            return;
+        }
+
+        if (this._navigationQueue.length > 0) {
+            const navigationContext = this._navigationQueue[0];
+            if (navigationContext.isBackNavigation) {
+                this.performGoBack(navigationContext);
+            } else {
+                this.performNavigation(navigationContext);
+            }
         }
     }
 
     @profile
     private performNavigation(navigationContext: NavigationContext) {
-        let navContext = navigationContext.entry;
-
-        // TODO: This should happen once navigation is completed.
-        if (navigationContext.entry.entry.clearHistory) {
-            this._backStack.length = 0;
-        } else if (FrameBase._isEntryBackstackVisible(this._currentEntry)) {
-            this._backStack.push(this._currentEntry);
-        }
-
+        const navContext = navigationContext.entry;
+        this._executingEntry = navContext;
         this._onNavigatingTo(navContext, navigationContext.isBackNavigation);
         this._navigateCore(navContext);
     }
 
     @profile
     private performGoBack(navigationContext: NavigationContext) {
-        const navContext = navigationContext.entry;
-        this._onNavigatingTo(navContext, navigationContext.isBackNavigation);
-        this._goBackCore(navContext);
+        let backstackEntry = navigationContext.entry;
+        const backstack = this._backStack;
+        if (!backstackEntry) {
+            backstackEntry = backstack[backstack.length - 1];
+            navigationContext.entry = backstackEntry;
+        }
+
+        this._executingEntry = backstackEntry;
+        this._onNavigatingTo(backstackEntry, true);
+        this._goBackCore(backstackEntry);
     }
 
     public _goBackCore(backstackEntry: BackstackEntry) {
@@ -505,8 +432,9 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
     }
 
     public eachChildView(callback: (child: View) => boolean) {
-        if (this.currentPage) {
-            callback(this.currentPage);
+        const page = this.currentPage;
+        if (page) {
+            callback(page);
         }
     }
 
@@ -596,6 +524,33 @@ export class FrameBase extends CustomLayoutView implements FrameDefinition {
 
         return result;
     }
+
+    public _onLivesync(): boolean {
+        super._onLivesync();
+
+        const currentEntry = this._currentEntry.entry;
+        const newEntry: NavigationEntry = {
+            animated: false,
+            clearHistory: true,
+            context: currentEntry.context,
+            create: currentEntry.create,
+            moduleName: currentEntry.moduleName,
+            backstackVisible: currentEntry.backstackVisible
+        }
+
+        // If create returns the same page instance we can't recreate it.
+        // Instead of navigation set activity content.
+        // This could happen if current page was set in XML as a Page instance.
+        if (newEntry.create) {
+            const page = newEntry.create();
+            if (page === this.currentPage) {
+                return false;
+            }
+        }
+
+        this.navigate(newEntry);
+        return true;
+    }
 }
 
 export function topmost(): FrameBase {
@@ -608,7 +563,7 @@ export function topmost(): FrameBase {
 
 export function goBack(): boolean {
     const top = topmost();
-    if (top.canGoBack()) {
+    if (top && top.canGoBack()) {
         top.goBack();
         return true;
     }
@@ -623,3 +578,11 @@ export function goBack(): boolean {
 export function stack(): Array<FrameBase> {
     return frameStack;
 }
+
+export const defaultPage = new Property<FrameBase, string>({
+    name: "defaultPage", valueChanged: (frame: FrameBase, oldValue: string, newValue: string) => {
+        frame.navigate({ moduleName: newValue });
+    }
+});
+
+defaultPage.register(FrameBase)

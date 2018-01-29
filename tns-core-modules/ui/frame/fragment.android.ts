@@ -19,6 +19,10 @@ class FragmentClass extends android.app.Fragment {
         return result;
     }
 
+    public onStop(): void {
+        this._callbacks.onStop(this, super.onStop);
+    }
+
     public onCreate(savedInstanceState: android.os.Bundle) {
         if (!this._callbacks) {
             setFragmentCallbacks(this);
@@ -46,7 +50,12 @@ class FragmentClass extends android.app.Fragment {
     }
 
     public toString(): string {
-        return this._callbacks.toStringOverride(this, super.toString);
+        const callbacks = this._callbacks;
+        if (callbacks) {
+            return callbacks.toStringOverride(this, super.toString);
+        } else {
+            super.toString();
+        }
     }
 }
 

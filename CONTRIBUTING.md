@@ -9,7 +9,7 @@ Here are some guides on how to do that:
  - [Submitting a PR](#pr)
 
 ##  <a name="coc"></a> Code of Conduct
-Help us keep a healthy and open community. We expect all participants in this project to adhere to the the [NativeScript Code Of Conduct](https://github.com/NativeScript/codeofconduct).
+Help us keep a healthy and open community. We expect all participants in this project to adhere to the [NativeScript Code Of Conduct](https://github.com/NativeScript/codeofconduct).
 
 
 ## <a name="bugs"></a> Reporting Bugs
@@ -55,7 +55,7 @@ git checkout -b <my-fix-branch> master
 ```
 
 4. The fun part! Make your code changes. Make sure you:
-    - Follow the [code conventions guide](CodeConvention.md).
+    - Follow the [code conventions guide](CodingConvention.md).
     - Write unit tests for your fix or feature. Check out [writing unit tests guide](WritingUnitTests.md).
 
 5. Before you submit your PR:
@@ -75,4 +75,4 @@ It's our turn from there on! We will review the PR and discuss changes you might
 
 ### Where to Start
 
-If you want to contribute, but you are not sure where to start - look for [issues marked with up-for-grabs tag](https://github.com/NativeScript/NativeScript/issues?q=is%3Aopen+is%3Aissue+label%3Aup-for-grabs).
+If you want to contribute, but you are not sure where to start - look for [issues labeled `help wanted`](https://github.com/NativeScript/NativeScript/issues?q=is%3Aopen+is%3Aissue+label%3A%22help+wanted%22).

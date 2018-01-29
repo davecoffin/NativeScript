@@ -1,7 +1,6 @@
 /**
  * @module "ui/core/view-base"
  */ /** */
-
 import { Property, CssProperty, CssAnimationProperty, InheritedProperty, Style } from "../properties";
 import { BindingOptions, Observable } from "../bindable";
 
@@ -110,6 +109,37 @@ export abstract class ViewBase extends Observable {
     _suspendedUpdates: { [propertyName: string]: Property<ViewBase, any> | CssProperty<Style, any> | CssAnimationProperty<Style, any> };
     //@endprivate
 
+    /**
+     * Shows the View contained in moduleName as a modal view.
+     * @param moduleName - The name of the module to load starting from the application root.
+     * @param context - Any context you want to pass to the modally shown view.
+     * This same context will be available in the arguments of the shownModally event handler.
+     * @param closeCallback - A function that will be called when the view is closed.
+     * Any arguments provided when calling ShownModallyData.closeCallback will be available here.
+     * @param fullscreen - An optional parameter specifying whether to show the modal page in full-screen mode.
+     */
+    showModal(moduleName: string, context: any, closeCallback: Function, fullscreen?: boolean, animated?: boolean): ViewBase;
+
+    /**
+     * Shows the view passed as parameter as a modal view.
+     * @param view - View instance to be shown modally.
+     * @param context - Any context you want to pass to the modally shown view. This same context will be available in the arguments of the shownModally event handler.
+     * @param closeCallback - A function that will be called when the view is closed. Any arguments provided when calling ShownModallyData.closeCallback will be available here.
+     * @param fullscreen - An optional parameter specifying whether to show the modal view in full-screen mode.
+     */
+    showModal(view: ViewBase, context: any, closeCallback: Function, fullscreen?: boolean, animated?: boolean): ViewBase;
+
+    /**
+     * Deprecated. Showing view as modal is deprecated.
+     * Use showModal method with arguments.
+     */
+    showModal(): ViewBase;
+
+    /**
+     * Closes the current modal view that this page is showing.
+     */
+    closeModal(): void;
+
     public effectiveMinWidth: number;
     public effectiveMinHeight: number;
     public effectiveWidth: number;
@@ -141,6 +171,11 @@ export abstract class ViewBase extends Observable {
     public android: any;
 
     /**
+     * returns the native UIViewController.
+     */
+    public viewController: any;
+
+    /**
      * read-only. If you want to set out-of-band the nativeView use the setNativeView method.
      */
     public nativeViewProtected: any;
@@ -158,6 +193,11 @@ export abstract class ViewBase extends Observable {
     public readonly parent: ViewBase;
 
     /**
+     * Gets the template parent or the native parent. Sets the template parent.
+     */
+    public parentNode: ViewBase;
+
+    /**
      * Gets or sets the id for this view.
      */
     public id: string;
@@ -166,11 +206,6 @@ export abstract class ViewBase extends Observable {
      * Gets or sets the CSS class name for this view.
      */
     public className: string;
-
-    /**
-     * Gets or sets inline style selectors for this view.   
-     */
-    public inlineStyleSelector: SelectorCore;
 
     /**
      * Gets owner page. This is a read-only property.
@@ -193,6 +228,18 @@ export abstract class ViewBase extends Observable {
      * Returns the child view with the specified id.
      */
     public getViewById<T extends ViewBase>(id: string): T;
+
+    /**
+     * Load view.
+     * @param view to load.
+     */
+    public loadView(view: ViewBase): void;
+
+    /**
+     * Unload view.
+     * @param view to unload.
+     */
+    public unloadView(view: ViewBase): void;
 
     public onLoaded(): void;
     public onUnloaded(): void;
@@ -220,15 +267,22 @@ export abstract class ViewBase extends Observable {
     _domId: number;
 
     _cssState: any /* "ui/styling/style-scope" */;
-    _setCssState(next: any /* "ui/styling/style-scope" */);
-    _registerAnimation(animation: KeyframeAnimation);
-    _unregisterAnimation(animation: KeyframeAnimation);
-    _cancelAllAnimations();
+    /**
+     * @private
+     * Notifies each child's css state for change, recursively.
+     * Either the style scope, className or id properties were changed. 
+     */
+    _onCssStateChange(): void;
 
     public cssClasses: Set<string>;
     public cssPseudoClasses: Set<string>;
 
     public _goToVisualState(state: string): void;
+    /**
+     * This used to be the way to set attribute values in early {N} versions.
+     * Now attributes are expected to be set as plain properties on the view instances.
+     * @deprecated
+     */
     public _applyXmlAttribute(attribute, value): boolean;
     public setInlineStyle(style: string): void;
 
@@ -293,7 +347,7 @@ export abstract class ViewBase extends Observable {
     /**
      * @protected
      * @unstable
-     * A widget can call this method to discard mathing css pseudo class.
+     * A widget can call this method to discard matching css pseudo class.
      */
     public deletePseudoClass(name: string): void;
 
@@ -315,6 +369,11 @@ export abstract class ViewBase extends Observable {
     public _styleScope: any;
 
     /**
+     * @private
+     */
+    _isStyleScopeHost: boolean;
+
+    /**
      * Determines the depth of suspended updates.
      * When the value is 0 the current property updates are not batched nor scoped and must be immediately applied.
      * If the value is 1 or greater, the current updates are batched and does not have to provide immediate update.
@@ -331,6 +390,21 @@ export abstract class ViewBase extends Observable {
      * @private
      */
     _setupAsRootView(context: any): void;
+
+    /**
+     * @private
+     */
+    _inheritStyleScope(styleScope: any /* StyleScope */): void;
+
+    /**
+     * @private
+     */
+    callLoaded(): void;
+
+    /**
+     * @private
+     */
+    callUnloaded(): void;
     //@endprivate
 }
 

@@ -88,11 +88,11 @@ export class ImageSource {
     fromBase64(source: string): Promise<boolean>;        
 
    /**
-    * Sets the provided native source object (typically a Bitmap).
+    * Sets the provided native source object (typically a Bitmap or a UIImage).
     * This will update either the android or ios properties, depending on the target os.
     * @param source The native image object. Will be either a Bitmap for Android or a UIImage for iOS.
     */
-    setNativeSource(source: any): boolean;
+    setNativeSource(source: any): void;
 
    /**
     * Saves this instance to the specified file, using the provided image format and quality.
@@ -148,6 +148,7 @@ export function fromBase64(source: string): ImageSource;
 export function fromNativeSource(source: any): ImageSource;
 
 /**
+ * Deprecated. Use http.getImage(url: string) instead.
 * Downloads the image from the provided Url and creates a new ImageSource instance from it.
 * @param url The link to the remote image object. This operation will download and decode the image.
 */
